@@ -4,11 +4,21 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 
-def format(floats):
-    result = " "
-    for v in floats:
-        result += " {:f}".format(v)
-    return result
+def print_matrix(matrix, offset):
+    for row in matrix:
+        print_vector(row, offset)
+
+
+def print_vector(vector, offset):
+    word = offset
+    isFirst = True
+    for cell in vector:
+        if isFirst:
+            word += "{: .4f}".format(cell)
+            isFirst = False
+        else:
+            word += "\t{: .4f}".format(cell)
+    print(word)
 
 
 def mean_interval(n, mean, s, t):
@@ -133,6 +143,12 @@ alpha = 0.2
 # В цикле перебираем все возможные степени полинома от 1 до 39 включительно
 # (не до 40, иначе в формуле ny / (nx - q - 1) будет деление на ноль)
 
+fisher_critical_ = np.empty(nx - 2)  # вектор для критических значений
+fisher_stat_ = np.empty(nx - 2)  # вектор для статистики
+covar_matrix_for_a: np.array  # ковариационная матрица
+corel_matrix_for_a: np.array  # корелляционная матрица
+first_q: int  # минимальная степень, которая подходит
+print("\nПроверка гипотез по критерию Фишера:\n")
 ready = False
 for q in range(1, nx - 1):
     # Матрица X
@@ -165,6 +181,9 @@ for q in range(1, nx - 1):
     # Критическое значение
     # Используем эту формулу так как nx > ny + 1, и матрица Сигма диагональная (да, по то же причине)
     fisher_critical = stats.f.ppf(1 - alpha, nx - q - 1, ny - 1)
+    # Заполняем ветора критических значений и статистики
+    fisher_stat_[q - 1] = fisher_stat
+    fisher_critical_[q - 1] = fisher_critical
     if fisher_stat < fisher_critical:
         # Подошло
         print("\t q = ", q, '\tКрит \t', fisher_critical, "\tСтат \t", fisher_stat)
@@ -172,20 +191,38 @@ for q in range(1, nx - 1):
         if not ready:
             ready = True
             # Посчитаем ковариационную матрицу оценок коэффициентов только для первого полинома, который подошел
-            print("\t Для q =", q)
-            covar_matrix_for_a = 1 / 10 * inv(np.matmul(np.matmul(x_matrix.transpose(), sigma_inv), x_matrix))
-            corel_matrix_for_a = np.empty(q + 1)
+            first_q = q
+            covar_matrix_for_a = 1 / ny * inv(np.matmul(np.matmul(x_matrix.transpose(), sigma_inv), x_matrix))
+            corel_matrix_for_a = np.empty((q + 1, q + 1))
             for i in range(q + 1):
-                corel_matrix_for_a[i] = covar_matrix_for_a[i, i] / (dispersions[i])
-            print("\t\t Ковариационная диагональня матрица")
-            print("\t\t\t", format(np.diagonal(covar_matrix_for_a)))
-            print("\t\t Корелляционная диагональня матрица")
-            print("\t\t\t", format(corel_matrix_for_a))
+                for j in range(q + 1):
+                    corel_matrix_for_a[i, j] = \
+                        covar_matrix_for_a[i, j] / \
+                        np.sqrt(covar_matrix_for_a[i, i] * covar_matrix_for_a[j, j])
+
     else:
         # Не подходит
         approx_rating[q - 1] = np.inf
 
-print(approx_rating)
+print("\nКовериационная и кореляционные матрицы для q =", first_q,
+      " (Можно скопировать их целиком в таблицу Word.\n"
+      "Для этого нужно выдлить все данные, скопировать их, выделить всю таблицу в Word и вставить)\n")
+print("\tКовариационная диагональня матрица:")
+print_matrix(covar_matrix_for_a, "")
+print("\n\tКорелляционная диагональня матрица:")
+print_matrix(corel_matrix_for_a, "")
+print("\n\t Рейтинг аппроксимаций:")
+print_vector(approx_rating, "")
+
+# Строим график зависимости статистики Фишера от степени полинома
+plt.plot(range(nx - 2), fisher_stat_)
+plt.yscale('log', basey=10)
+plt.title("Зависимость статистики Фишера от степени полинома")
+plt.xlabel(r"$q$")
+plt.ylabel(r"$F_\alpha$")
+plt.savefig("../out/stat_with_q.png", dpi=200)
+plt.show()
+plt.close()
 
 # Посчитаем ковариационную матрицу оценок коэффициентов для полинома с наименьшей степенью и
 # с наименьшей статистикой, но такие, которые прошли отбор
@@ -200,8 +237,11 @@ for i in range(len(approx_rating)):
     if approx_rating[i] < approx_rating[min_stat_index]:
         min_stat_index = i
 
-print(min_power_index)
-print(min_stat_index)
+# Печатаем коэффициенты для полиномов с 9 по 16 степень
+print("\tСтепени при X начинаются с 0")
+for i in range(8, 16):
+    print("\tКоэффициенты а для полинома степени " + str(i + 1))
+    print_vector(a[i][:i + 2], "\t")
 
 
 # ============= ПОСТРОИМ ГРАФИКИ ДЛЯ ПОЛИНОМОВ И CРЕДНИХ ЗНАЧЕНИЙ
@@ -215,8 +255,8 @@ def polinom(coefficients, x):
 
 # Строим графики
 plt.plot(x, y_)
-plt.plot(x, polinom(a[min_stat_index], x), '--')
-plt.plot(x, polinom(a[min_power_index], x), '-.')
+plt.plot(x, polinom(a[min_stat_index + 1], x), '--')
+plt.plot(x, polinom(a[min_power_index + 1], x), '-.')
 plt.plot(x, polinom(a[0], x), ':', c='grey')
 text_1 = 'Полином степени ' + str(min_stat_index + 1)
 text_2 = 'Полином степени ' + str(min_power_index + 1)
